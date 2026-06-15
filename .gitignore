@@ -49,3 +49,5 @@ logs/
 
 # Docker
 .docker/
+client_secret.json
+youtube_token.json

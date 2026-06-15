@@ -76,6 +76,11 @@ TAIL_SILENCE = 0.5                  # cola de silencio tras cada narración
 CLAIM_LINE_1 = "+3.000 productos · QC real"
 CLAIM_LINE_2 = "100% español 🇪🇸"
 
+# Enlaces (configurables por .env; valores por defecto de FindsES)
+DEFAULT_WEB = "https://www.chinabuyhub.com/"
+DEFAULT_SHEET = ("https://docs.google.com/spreadsheets/d/"
+                 "1BqVU-a3KyK0Xvj1Vh0foH2T1Htfv9qNSmLxO_ELBu0c/edit")
+
 # Paleta
 BG = (14, 14, 20)
 ACCENT = (255, 60, 78)
@@ -473,19 +478,27 @@ def render_hook_frame(seg: dict, t: float) -> Image.Image:
 def render_outro_frame(seg: dict, t: float) -> Image.Image:
     img = Image.new("RGB", (WIDTH, HEIGHT), BG)
     d = ImageDraw.Draw(img)
-    y = HEIGHT // 2 - 340
-    text_centered(d, strip_emoji(CLAIM_LINE_1), font(58), y, fill=WHITE, stroke=5)
-    text_centered(d, strip_emoji(CLAIM_LINE_2), font(58), y + 90, fill=WHITE, stroke=5)
+    y = HEIGHT // 2 - 420
+    text_centered(d, strip_emoji(CLAIM_LINE_1), font(56), y, fill=WHITE, stroke=5)
+    text_centered(d, strip_emoji(CLAIM_LINE_2), font(56), y + 86, fill=WHITE, stroke=5)
     # CTA con pulso
     pulse = 1 + 0.05 * math.sin(t * 6)
-    cta = font(int(92 * pulse))
-    text_centered(d, "ÚNETE AL DISCORD", cta, y + 230, fill=ACCENT, stroke=7)
+    text_centered(d, "ÚNETE AL DISCORD", font(int(88 * pulse)),
+                  y + 210, fill=ACCENT, stroke=7)
     if seg.get("discord"):
         text_centered(d, seg["discord"].replace("https://", ""),
-                      font(46), y + 390, fill=WHITE, stroke=4)
-    # flecha
-    text_centered(d, "v", font(80), y + 470, fill=WHITE, stroke=5)
+                      font(44), y + 350, fill=WHITE, stroke=4)
+    # Web + recordatorio de links en la descripción
+    if seg.get("web"):
+        text_centered(d, _clean_url(seg["web"]), font(56),
+                      y + 470, fill=YELLOW, stroke=5)
+    text_centered(d, "Links en la descripción", font(40),
+                  y + 560, fill=WHITE, stroke=4)
     return img
+
+
+def _clean_url(url: str) -> str:
+    return re.sub(r"^https?://(www\.)?", "", url).rstrip("/")
 
 
 RENDERERS = {
@@ -566,11 +579,18 @@ def render_video(segments: list, out_path: Path, music: Path | None) -> None:
 # --------------------------------------------------------------------------- #
 # Orquestación
 # --------------------------------------------------------------------------- #
+def _norm(s: str) -> str:
+    """Normaliza para comparar categorías: sin emojis, sin tildes, minúsculas."""
+    s = strip_emoji(s)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return s.lower().strip()
+
+
 def pick_products(catalog, category, count):
     prods = catalog["productos"]
     if category:
-        cat_l = category.lower()
-        prods = [p for p in prods if cat_l in strip_emoji(p["categoria"]).lower()]
+        cat_n = _norm(category)
+        prods = [p for p in prods if cat_n in _norm(p["categoria"])]
     return [p for p in prods if p["fotos"]][:count]
 
 
@@ -621,8 +641,11 @@ def run(args) -> int:
         print(f"  [{i+1}/{len(products)}] {strip_emoji(p['producto'])} "
               f"— {price_str(p['precio_eur'])} ({dur:.1f}s)")
 
+    web = os.environ.get("WEB_URL", DEFAULT_WEB)
+    sheet = os.environ.get("SPREADSHEET_URL", DEFAULT_SHEET)
+
     segments.append({
-        "kind": "outro", "discord": discord,
+        "kind": "outro", "discord": discord, "web": web,
         "duration": OUTRO_SECONDS, "audio": None,
     })
 
@@ -630,11 +653,56 @@ def run(args) -> int:
     print("Renderizando (fotograma a fotograma)...")
     render_video(segments, out, Path(args.music) if args.music else None)
 
+    write_caption(out, cat_label, products, discord, web, sheet)
+
     total = sum(s["duration"] for s in segments)
     print(f"\n[OK] Vídeo: {out}")
     print(f"     ~{total:.1f}s · {WIDTH}x{HEIGHT} · "
           f"{out.stat().st_size/1_000_000:.1f} MB")
+    print(f"     Descripción: {out.with_suffix('.txt')}")
     return 0
+
+
+# --------------------------------------------------------------------------- #
+# Descripción para YouTube/TikTok (links clicables + hashtags)
+#   - <video>.json : lo lee el subidor (título, descripción, tags)
+#   - <video>.txt  : versión legible para copiar/pegar a mano
+# --------------------------------------------------------------------------- #
+HASHTAGS_BASE = ["finds", "reps", "findsespaña", "spreadsheet", "qc",
+                 "chinabuyhub", "haul", "fyp", "parati"]
+
+
+def write_caption(video: Path, category: str, products, discord, web, sheet):
+    cat = category.title()
+    n = len(products)
+    title = f"😱 {n} FINDS de {category} con QC REAL y precios en € | FindsES 🇪🇸"
+
+    lines = [
+        f"Los mejores finds de {cat} con QC real y precio en €. 100% español 🇪🇸",
+        "",
+        f"📋 Spreadsheet completa (+3.000 productos): {sheet}",
+        f"🛒 Mi web: {web}",
+    ]
+    if discord:
+        d = discord if discord.startswith("http") else f"https://{discord}"
+        lines.append(f"💬 Discord (QC + ayuda 24/7): {d}")
+    lines += ["", "👇 Productos de este vídeo:"]
+    for p in products:
+        lines.append(f"• {strip_emoji(p['producto'])} — {price_str(p['precio_eur'])}")
+
+    cat_tag = re.sub(r"[^a-z0-9]", "", category.lower())
+    tags = HASHTAGS_BASE + ([cat_tag] if cat_tag else [])
+    hashtags = " ".join(f"#{t}" for t in tags)
+    lines += ["", hashtags]
+
+    description = "\n".join(lines)
+    video.with_suffix(".txt").write_text(
+        f"{title}\n\n{description}\n", encoding="utf-8")
+    video.with_suffix(".json").write_text(json.dumps({
+        "title": title[:100],          # límite de YouTube
+        "description": description,
+        "tags": tags,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _safe_photo(p, i):
