@@ -1,0 +1,129 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: videoagent-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=postgresql+asyncpg://videoagent:videoagent@db:5432/videoagent
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_BASE_PATH=/data/storage
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - videoagent-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: videoagent-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - videoagent-net
+
+  db:
+    image: postgres:16-alpine
+    container_name: videoagent-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=videoagent
+      - POSTGRES_PASSWORD=videoagent
+      - POSTGRES_DB=videoagent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - videoagent-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U videoagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: videoagent-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - videoagent-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: videoagent-worker
+    restart: unless-stopped
+    command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - videoagent-net
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: videoagent-beat
+    restart: unless-stopped
+    command: celery -A backend.workers.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - videoagent-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+
+networks:
+  videoagent-net:
+    driver: bridge
