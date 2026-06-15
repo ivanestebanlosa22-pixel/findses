@@ -26,6 +26,7 @@ frontend/dist/
 
 # Artefactos generados por el pipeline (regenerables)
 catalog.json
+storage/
 *.mp4
 !USFans_Agente_Compras_Chino_11minTEMP_MPY_wvf_snd.mp4
 
