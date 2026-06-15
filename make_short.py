@@ -339,9 +339,13 @@ def build_video(segments: list[dict], out_path: Path, music: Path | None) -> Non
         subprocess.run(cmd, check=True, capture_output=True)
         parts.append(part)
 
-    # Lista para el demuxer concat
+    # Lista para el demuxer concat.
+    # OJO Windows: el demuxer concat trata '\' como escape, así que las rutas
+    # deben ir con barras normales '/' (as_posix), o ffmpeg falla con EINVAL.
     listfile = TMP_DIR / "concat.txt"
-    listfile.write_text("".join(f"file '{p.resolve()}'\n" for p in parts))
+    listfile.write_text(
+        "".join(f"file '{p.resolve().as_posix()}'\n" for p in parts)
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     concat_cmd = [
