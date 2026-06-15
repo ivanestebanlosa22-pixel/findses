@@ -334,7 +334,12 @@ def build_video(segments: list[dict], out_path: Path, music: Path | None) -> Non
             "-t", f"{dur:.3f}",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(FPS),
             "-vf", f"scale={WIDTH}:{HEIGHT},format=yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-shortest", str(part),
+            # Normalizamos TODO el audio a 44100 Hz estéreo. Si no, los clips de
+            # voz (24000 Hz de edge-tts) y los de silencio (44100 Hz) tienen
+            # frecuencias distintas y, al concatenar, la voz suena acelerada
+            # y aguda (efecto "cámara rápida" / ardilla).
+            "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+            "-shortest", str(part),
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         parts.append(part)
