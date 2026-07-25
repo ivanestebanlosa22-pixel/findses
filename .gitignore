@@ -24,6 +24,12 @@ frontend/dist/
 .env
 .env.local
 
+# Artefactos generados por el pipeline (regenerables)
+catalog.json
+storage/
+*.mp4
+!USFans_Agente_Compras_Chino_11minTEMP_MPY_wvf_snd.mp4
+
 # Storage
 storage/audio/
 storage/images/
@@ -43,3 +49,5 @@ logs/
 
 # Docker
 .docker/
+client_secret.json
+youtube_token.json
